@@ -1900,7 +1900,8 @@ canvas.confetti { position: fixed; inset: 0; width: 100%; height: 100%; z-index:
   border: 0; border-radius: 999px; cursor: pointer; font: 800 15px/1 var(--ui); white-space: nowrap; color: var(--paper-ink); background: linear-gradient(180deg, var(--accent-hi), var(--accent));
   box-shadow: 0 4px 0 var(--accent-deep), 0 12px 30px rgba(0,0,0,.5), 0 0 26px rgba(255,190,70,.35); transform: translate(-50%, 140%); opacity: 0; pointer-events: none;
   transition: transform .35s cubic-bezier(.2,1.2,.4,1), opacity .25s; }
-.p-gopill.on { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.p-gopill:not([hidden]) { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.p-gopill[hidden] { display: none; }
 .p-gopill svg { width: 17px; height: 17px; }
 /* ============================== HOST CONSOLE ============================== */
 .h-wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 18px 22px 60px; }
@@ -6758,7 +6759,28 @@ body.role-player #pwrap #pollc .p-small { margin: 10px 0 0 !important; }
   body.role-player #pwrap .p-answer .answers .ans .t { font-size: 16px; }
 }
 
+/* Keep the keypad within reach on phones. */
+@media (max-width: 759px) {
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .station-stage {
+    display: grid; grid-template-columns: clamp(80px, 24vw, 120px) minmax(0, 1fr); align-items: center; gap: 10px;
+  }
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .pi-top { grid-column: 1 / -1; }
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .pi-photo {
+    width: 100%; height: auto; aspect-ratio: 1;
+  }
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .pi-photo:has(.sticker) .art { bottom: 18px; }
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .pi-photo .sticker {
+    inset: auto 0 0; width: auto; max-width: none; padding: 3px 0; border: 0; border-radius: 0;
+    font: 800 10px/1.1 var(--ns-ui); letter-spacing: 0; text-align: center; transform: none; box-shadow: none;
+  }
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .pi-q {
+    padding: 12px; font-size: clamp(17px, 4.7vw, 20px); text-align: left; text-wrap: pretty;
+  }
+  body.role-player #pwrap .p-scene:not(.mv):not(.revealing) .pi-price { display: none; }
+}
+
 /* ---------- the phone leaderboard ---------- */
+
 body.role-player #pwrap .p-mine-rank { text-align: center; background: linear-gradient(#fffaf0, #f8eccd); color: var(--ns-ink); border-color: var(--ns-brass); box-shadow: 0 0 0 3px #6b4a12, 0 14px 28px rgba(0,0,0,.45); }
 body.role-player #pwrap .p-mine-rank .lab2 { font: 800 12px/1 var(--ns-ui); letter-spacing: .16em; text-transform: uppercase; color: #6b4a12; }
 body.role-player #pwrap .p-mine-rank .p-rank { margin: 6px 0 0; font: 76px/1 var(--ns-show); color: #a3141f; text-shadow: 0 4px 0 rgba(0,0,0,.12); }
@@ -7655,13 +7677,18 @@ function ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n 
 // have a comma), since a thousands comma is always followed by three.
 function parseGuess(raw) {
   if (raw == null) return NaN;
-  let s = String(raw).toLowerCase().replace(/[\s$_]/g, '');
-  if (/^\d+,\d{1,2}(?!\d)/.test(s) && !/\./.test(s) && (s.match(/,/g) || []).length === 1) s = s.replace(',', '.');
-  s = s.replace(/,/g, '').replace(/dollars?|bucks|usd/g, '');
-  const m = s.match(/^(\d*\.?\d+|\d+\.)(k|thousand|m|mil|mill|million|mm|b|bn|billion|t|trillion)?$/);
+  const s = String(raw).toLowerCase().replace(/[\s$_]/g, '').replace(/dollars?|bucks|usd/g, '');
+  const m = s.match(/^([\d.,]+)(k|thousand|m|mil|mill|million|mm|b|bn|billion|t|trillion)?$/);
   if (!m) return NaN;
+  let amount = m[1];
+  if (/^(?:\d*|\d{1,3}(?:\.\d{3})+),\d{1,2}$/.test(amount)) {
+    amount = amount.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d{1,3}(?:,\d{3})+(?:\.\d*)?$/.test(amount)) {
+    amount = amount.replace(/,/g, '');
+  }
+  if (!/^(?:\d*\.\d+|\d+\.?)$/.test(amount)) return NaN;
   const mult = { k: 1e3, thousand: 1e3, m: 1e6, mil: 1e6, mill: 1e6, million: 1e6, mm: 1e6, b: 1e9, bn: 1e9, billion: 1e9, t: 1e12, trillion: 1e12 }[m[2]] || 1;
-  return Math.round(parseFloat(m[1]) * mult * 100) / 100;
+  return Math.round(Number(amount) * mult * 100) / 100;
 }
 const GUESS_MAX = 1e12;
 function rid(n = 10) {
@@ -9557,11 +9584,14 @@ function factBoxHTML(it, i) {
 // Its timing, from when the item appeared (so a screen that loads late catches up): the box arrives at 3.5 s with
 // the first fact, the second about 10 s in. It stays up through time's up and goes when the reveal starts.
 // later(ms, fn) schedules; onSay() runs as each fact arrives on time (a desk bell on the big screen).
-function runFacts(box, it, i, shownAt, later, onSay) {
+function runFacts(box, it, i, shownAt, later, isGuessing, onSay) {
   if (!box) return;
   const chat = i % 2 === 0, f2 = (it.facts || [])[1];
   const e = store.serverNow() - (shownAt || store.serverNow());
-  const at = (ms, fn) => { if (ms - e > -400) later(ms - e, () => fn(false)); else fn(true); };
+  const at = (ms, fn) => {
+    if (ms - e <= -400) fn(true);
+    else later(ms - e, () => { if (isGuessing()) fn(false); });
+  };
   const say = (cls, late) => { box.classList.add(cls); if (!late && onSay) onSay(); };
   at(3500, () => box.classList.add('on'));
   if (chat) { at(4800, late => say('s1', late)); if (f2) { at(9000, () => box.classList.add('w2')); at(10300, late => say('s2', late)); } }
@@ -11268,6 +11298,19 @@ function PlayerApp(code0, asyncMeta) {
   // (October sent something across the screen now and then; the falling snow does that job now)
   function startAmbient() { clearTimeout(ambTimer); }
 
+  function answerShortcut(label, panel, inputSelector) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'p-gopill';
+    button.hidden = true;
+    button.innerHTML = `${ICON.cart}<span>${label}</span>`;
+    button.onclick = () => {
+      panel.querySelector(inputSelector)?.focus({ preventScroll: true });
+      panel.scrollIntoView({ block: 'start', behavior: 'instant' });
+    };
+    return button;
+  }
+
   function bidKeys() {
     const keys = ['1','2','3','4','5','6','7','8','9','.','0','erase'];
     return `<div class="bid-keys" role="group" aria-label="Price keypad">${keys.map(key =>
@@ -11474,15 +11517,14 @@ function PlayerApp(code0, asyncMeta) {
       wireArt(el);
       const act = $('.pi-act', el), after = $('.pi-after', el), fbox = $('.facts', el), priceBox = $('.pi-price', el), fitBox = $('.pi-rowfit', el);
       // "Make your guess": a floating pill while the guess box is out of view and nothing is locked in yet
-      const pill = mk('p-gopill', `${ICON.cart}<span>Make your guess</span>`); pill.setAttribute('role', 'button'); pill.tabIndex = 0;
+      const pill = answerShortcut('Make your guess', act, '#gi');
       // "In view" = enough of the price box itself shows to see it's there and tap it (so the pill never covers a box
       // that's already in reach, and does show when only the card's edge peeks in at the bottom).
       const boxSeen = () => {
         const n = $('#gi', act) || act, r = n.getBoundingClientRect();
         return Math.min(innerHeight, r.bottom) - Math.max(0, r.top) >= Math.min(34, r.height * .6);
       };
-      const paintPill = () => pill.classList.toggle('on', actSig.startsWith('form|') && !mine() && !boxSeen());
-      pill.onclick = () => { const gi = $('#gi', act); try { act.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { act.scrollIntoView(); } if (gi) setTimeout(() => gi.focus(), 420); };
+      const paintPill = () => pill.toggleAttribute('hidden', !actSig.startsWith('form|') || !!mine() || boxSeen());
       const io = 'IntersectionObserver' in window ? new IntersectionObserver(() => paintPill(), { threshold: Array.from({ length: 21 }, (_, k) => k / 20) }) : null;
       const deal = $('.pi-deal', el), cnt = $('.cnt', deal), clk = $('.clk', deal);
       const row = PriceRow(DRUM_DOLLARS);
@@ -11652,15 +11694,15 @@ function PlayerApp(code0, asyncMeta) {
         const elapsed = store.serverNow() - s.revealAt;
         plan = planFor(s, res);
         if (plan.lead + 1 > row.nD) row.resize(plan.lead + 1);
+        el.classList.add('revealing');
         fitRow(false, true);
         paintAct();
         if (fbox) later(350, () => fbox.classList.add('gone'));
-        if (s.skipAt && s.skipAt >= s.revealAt) { el.classList.add('revealing'); return land(res, 'skip'); }
+        if (s.skipAt && s.skipAt >= s.revealAt) return land(res, 'skip');
         // Never ahead of the big screen: a phone that arrives late (or late to the news) catches up mid-spin, one
         // that arrives after the landing shows the price, and one set to reduce motion just waits for the landing.
-        if (elapsed >= plan.land) { el.classList.add('revealing'); return land(res, 'restore'); }
-        if (calmMotion()) { el.classList.add('revealing'); later(plan.land - elapsed, () => land(res, 'restore')); return; }
-        el.classList.add('revealing');
+        if (elapsed >= plan.land) return land(res, 'restore');
+        if (calmMotion()) { later(plan.land - elapsed, () => land(res, 'restore')); return; }
         // bring the price into view if they'd scrolled down to the facts
         const r = priceBox.getBoundingClientRect();
         if (r.top < 60 || r.bottom > innerHeight - 40) { try { priceBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ } }
@@ -11761,7 +11803,7 @@ function PlayerApp(code0, asyncMeta) {
         } else {
           requestAnimationFrame(() => requestAnimationFrame(() => pins.forEach(n => { n.style.left = n.dataset.x; })));
           countUp($('.gv', after), 0, gain, 1100);
-          if (s && res.bull && res.bull[pid]) { confetti(4200, 110); buzz([40, 60, 40, 60, 120]); if (ASYNC) Sfx.fanfare(); }
+          if (s && res.bull && res.bull[pid]) { confetti(1200, 44); buzz([40, 60, 40, 60, 120]); if (ASYNC) Sfx.fanfare(); }
           else if (s && s.b) buzz([30, 50, 90]);
           else if (ASYNC && gain > 0) Sfx.chime();
           later(450, () => { const r = after.getBoundingClientRect(); if (r.top > innerHeight * .62) { try { window.scrollBy({ top: r.top - innerHeight * .38, behavior: 'smooth' }); } catch (e) { /* ignore */ } } });
@@ -11779,7 +11821,7 @@ function PlayerApp(code0, asyncMeta) {
       function update() {
         const s = stateOf(room); if (!here(s)) return;
         if (s.phase === 'item') {
-          if (!factsOn) { factsOn = true; runFacts(fbox, it, i, s.shownAt, later, ASYNC ? () => { if (stateOf(room).phase === 'item') Sfx.ding(); } : null); }
+          if (!factsOn) { factsOn = true; runFacts(fbox, it, i, s.shownAt, later, () => stateOf(room).phase === 'item', ASYNC ? () => Sfx.ding() : null); }
           paintDeal(s, store.serverNow()); paintAct();
         } else if (s.phase === 'reveal') {
           if (!started) startReveal(s);
@@ -11831,7 +11873,7 @@ function PlayerApp(code0, asyncMeta) {
         <div class="pi-right station-console">
           <div class="pi-buy">
             <div class="pi-deal" aria-live="off"><div class="cnt"><span class="ic">${ICON.gift}</span><b></b><span class="st"></span><span class="bar"><i></i></span></div><div class="clk"><span class="ic">${ICON.clock}</span><b></b><span class="st2"></span></div></div>
-            <div class="panel p-answer"><div class="gtime" aria-hidden="true">${countdownHTML()}</div>${answersHTML(it.choices, false)}
+            <div class="panel p-answer">${answersHTML(it.choices, false)}
               <p class="hint"></p>${ASYNC ? '<button class="btn block mv-lock" type="button" id="mvlock" disabled>Lock it in</button>' : ''}</div>
           </div>
           <div class="pi-after"></div>
@@ -11843,11 +11885,10 @@ function PlayerApp(code0, asyncMeta) {
       const draft = () => (ASYNC && !mine() ? pickOf({ v: drafts[dk] }) : 0);     // play-anytime: tapped, not locked in yet
       let started = false, done = false, stage = 0, landedSig = '', clockSig = '', hintSig = '', wasUp = false, crowd = null;
       // "Pick your answer": a floating pill while the answers are out of view and nothing is picked yet
-      const pill = mk('p-gopill', `${ICON.cart}<span>Pick your answer</span>`); pill.setAttribute('role', 'button'); pill.tabIndex = 0;
+      const pill = answerShortcut('Pick your answer', panel, '.ans');
       const boxSeen = () => { const r = box.getBoundingClientRect(); return Math.min(innerHeight, r.bottom) - Math.max(0, r.top) >= Math.min(120, r.height * .5); };
       const canPick = s => here(s) && s.phase === 'item' && clockInfo(s, store.serverNow()).mode !== 'up' && !(ASYNC && mine());
-      const paintPill = () => pill.classList.toggle('on', canPick(stateOf(room)) && !mine() && !draft() && !boxSeen());
-      pill.onclick = () => { try { panel.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { panel.scrollIntoView(); } };
+      const paintPill = () => pill.toggleAttribute('hidden', !canPick(stateOf(room)) || !!mine() || !!draft() || boxSeen());
       const io = 'IntersectionObserver' in window ? new IntersectionObserver(() => paintPill(), { threshold: Array.from({ length: 11 }, (_, k) => k / 10) }) : null;
       const onResize = () => fitClue(bay, false);
       $$('.postcard img', el).forEach(img => img.addEventListener('load', () => { syncCredit(el, stage >= 2); fitClue(bay, false); }));
@@ -11863,9 +11904,8 @@ function PlayerApp(code0, asyncMeta) {
         if (done) h = '';
         else if (s.phase === 'reveal') h = MVI.lock + '<span>And the answer is…</span>';
         else if (c.mode === 'up') h = MVI.lock + "<span>Time's up. Answers are locked.</span>";
-        else if (ASYNC) h = MVI.clock + `<span>${c.mode === 'run' ? `<b>${c.sec}s</b> to answer. ` : ''}Tap your answer, then lock it in.</span>`;
-        else if (c.mode === 'run') h = MVI.clock + `<span><b>${c.sec}s</b> to answer. ${mine() ? 'Tap another to change your pick.' : 'Tap your answer.'}</span>`;
-        else h = MVI.clock + `<span>${mine() ? 'Tap another to change your pick.' : 'Tap your answer. You can change it until the clock ends.'}</span>`;
+        else if (ASYNC) h = 'Tap your answer, then lock it in.';
+        else h = mine() ? 'Tap another to change your pick.' : 'Tap your answer.';
         if (h !== hintSig) { hintSig = h; hint.innerHTML = h; hint.hidden = !h; }
         if (up && !wasUp && s.phase === 'item') { buzz(60); if (ASYNC) Sfx.shopChime(); }
         wasUp = up;
@@ -11901,9 +11941,6 @@ function PlayerApp(code0, asyncMeta) {
           }
         }
         el.classList.toggle('hurry', c.mode === 'run' && c.sec <= 10 && !mine() && !draft());   // ten seconds left, nothing picked
-        const bar = $('.gtime', panel);
-        paintCountdown($('.cdl', bar), c, s.secs || clockSecsFor(it, settingsOf(room)));
-        if (ASYNC && !s.endsAt) bar.hidden = true;   // play-anytime with no timer: no countdown bar
         const sig = c.mode + (c.mode === 'run' ? c.sec : '');
         if (sig === clockSig) return;
         if (ASYNC && clockSig && c.mode === 'run' && c.sec <= 5 && c.sec > 0 && !mine()) Sfx.tick(true);
@@ -13218,7 +13255,7 @@ function DisplayApp(code, key) {
       function schedulePops() {
         const s = stateOf(room); if (popsOn || s.phase !== 'item' || !here(s)) return;
         popsOn = true;
-        runFacts($('.facts', el), it, i, s.shownAt, later, () => Sfx.ding());
+        runFacts($('.facts', el), it, i, s.shownAt, later, () => stateOf(room).phase === 'item', () => Sfx.ding());
       }
       function update() {
         const s = stateOf(room);
@@ -13595,8 +13632,12 @@ function DisplayApp(code, key) {
       snd.innerHTML = Sfx.on && Sfx.ready ? ICON.soundOn + '<span>Sound on</span>' : ICON.soundOff + '<span>Sound off</span>';
       if (code) reportSound();
     };
-    const wake = () => { if (Sfx.on && !Sfx.ready) { Sfx.unlock(); setTimeout(paint, 150); } };
-    snd.addEventListener('click', e => { e.stopPropagation(); snd.blur(); if (Sfx.on && !Sfx.ready) Sfx.unlock(); else Sfx.on = !Sfx.on; setTimeout(paint, 150); });
+    const toggleSound = () => { Sfx.on = !(Sfx.on && Sfx.ready); setTimeout(paint, 150); };
+    const wake = e => {
+      if (e.composedPath().includes(snd) || e.key?.toLowerCase() === 'm') return;
+      if (Sfx.on && !Sfx.ready) { Sfx.unlock(); setTimeout(paint, 150); }
+    };
+    snd.addEventListener('click', e => { e.stopPropagation(); toggleSound(); });
     // (the webkit names and the promise checks keep older Safari happy)
     const full = () => {
       const d = document, el = d.documentElement, ok = r => { if (r && r.catch) r.catch(() => {}); };
@@ -13607,7 +13648,7 @@ function DisplayApp(code, key) {
     addEventListener('pointerdown', wake); addEventListener('keydown', wake);
     addEventListener('keydown', e => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === 'm' || e.key === 'M') { Sfx.on = !Sfx.on; setTimeout(paint, 150); }
+      if (e.key === 'm' || e.key === 'M') toggleSound();
       if (e.key === 'f' || e.key === 'F') full();
     });
     let idle = 0;
